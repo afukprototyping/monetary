@@ -96,7 +96,8 @@ BUDGET_PLAN = {
     'Nabung': 700000
 }
 
-st.title("💰 Dashboard Keuangan & KPI 2026 (Online Database)")
+# REVISI 1: Judul Dashboard
+st.title("💰 Dashboard Keuangan")
 
 # 1. SIDEBAR: Input Transaksi
 with st.sidebar:
@@ -152,7 +153,9 @@ else:
     df_month = pd.DataFrame()
 
 # --- KPI SALDO (HARTA) ---
-st.subheader("🏦 Posisi Saldo (Real-Time)")
+# REVISI 2: Subheader dihapus
+# st.subheader("🏦 Posisi Saldo (Real-Time)") 
+
 saldo_cols = st.columns(len(AKUN_LIST))
 total_harta = 0
 
@@ -167,7 +170,8 @@ if not df.empty:
 else:
     st.info("Belum ada data transaksi.")
 
-st.info(f"**Total Harta (Net Worth): Rp {total_harta:,.0f}**")
+# REVISI 3: Label Net Worth
+st.info(f"**Net Worth: Rp {total_harta:,.0f}**")
 st.divider()
 
 # --- MONITORING BUDGET ---
@@ -198,5 +202,14 @@ with col_kanan:
     st.metric("Sisa", f"{sisa_total:,.0f}", delta=f"{sisa_total:,.0f}")
 
 st.divider()
-with st.expander("Lihat Riwayat Transaksi (Google Sheets)"):
-    st.dataframe(df.sort_values(by='Tanggal', ascending=False) if not df.empty else df, use_container_width=True)
+
+# REVISI 4: Judul Expander
+with st.expander("Riwayat Transaksi"):
+    if not df.empty:
+        # REVISI 5: Format Tanggal Display (Hapus Jam)
+        df_display = df.copy()
+        df_display['Tanggal'] = df_display['Tanggal'].dt.strftime('%d-%m-%Y')
+        
+        st.dataframe(df_display.sort_values(by='Tanggal', ascending=False), use_container_width=True)
+    else:
+        st.dataframe(df, use_container_width=True)
