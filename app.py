@@ -3,7 +3,7 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
-import plotly.express as px  # Pastikan install: pip install plotly
+import plotly.express as px
 
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Financial Dashboard", layout="wide")
@@ -48,7 +48,6 @@ def load_data():
         if df.empty:
             return pd.DataFrame(columns=['Tanggal', 'Tipe', 'Kategori', 'Sumber', 'Tujuan', 'Nominal', 'Catatan'])
         
-        # Pastikan format tanggal benar
         df['Tanggal'] = pd.to_datetime(df['Tanggal'], format='mixed')
         return df
     except gspread.exceptions.SpreadsheetNotFound:
@@ -97,7 +96,6 @@ st.title("💰 Financial Dashboard")
 with st.sidebar:
     st.header("⚙️ Filter Data")
     
-    # 1. Logic Filter Bulan (History)
     if not df.empty:
         df['Bulan_Tahun'] = df['Tanggal'].dt.strftime('%Y-%m')
         available_months = sorted(df['Bulan_Tahun'].unique(), reverse=True)
@@ -206,50 +204,77 @@ st.divider()
 st.subheader("📊 Analisis Pengeluaran")
 
 if not df_month.empty:
-    df_chart = df_month[df_month['Tipe'] == 'Expense'].copy()
+    # 1. Filter Data: Hanya Expense & Hapus Kategori 'Lainnya'
+    df_chart = df_month[
+        (df_month['Tipe'] == 'Expense') & 
+        (df_month['Kategori'] != 'Lainnya')
+    ].copy()
     
     if not df_chart.empty:
         col_chart1, col_chart2 = st.columns([2, 1])
 
-        # 1. AREA CHART (Tren Harian) - Lebih Modern dari Line biasa
+        # 1. AREA CHART (Updated to Plotly for Better Contrast)
         with col_chart1:
             st.caption("Tren Pengeluaran Harian")
-            daily_chart = df_chart.pivot_table(index='Tanggal', columns='Kategori', values='Nominal', aggfunc='sum').fillna(0)
-            st.area_chart(daily_chart)
-
-        # 2. HORIZONTAL BAR CHART (Proporsi Modern)
-        with col_chart2:
-            st.caption("Top Kategori Pengeluaran")
+            # Grouping per tanggal dan kategori
+            daily_chart = df_chart.groupby(['Tanggal', 'Kategori'])['Nominal'].sum().reset_index()
             
-            # Grouping dan Sorting Data
-            bar_data = df_chart.groupby('Kategori')['Nominal'].sum().reset_index().sort_values(by='Nominal', ascending=True)
-            
-            # Membuat Bar Chart Horizontal dengan Plotly
-            fig = px.bar(
-                bar_data, 
-                x='Nominal', 
-                y='Kategori', 
-                orientation='h', 
-                text_auto='.2s', # Format angka ringkas (cth: 1.5M, 200k)
-                color='Kategori', # Warna pembeda
+            # Gunakan Plotly Area agar warna distinct & tidak overlap butek
+            fig_area = px.area(
+                daily_chart, 
+                x="Tanggal", 
+                y="Nominal", 
+                color="Kategori",
+                line_group="Kategori"
             )
-            
-            # Styling agar clean & modern
-            fig.update_layout(
-                showlegend=False, # Hilangkan legend karena sudah ada label Y-axis
+            # Layout minimalis
+            fig_area.update_layout(
                 xaxis_title=None,
                 yaxis_title=None,
-                plot_bgcolor="rgba(0,0,0,0)", # Background transparan
                 margin=dict(t=0, b=0, l=0, r=0),
-                height=300 # Tinggi disesuaikan agar pas
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                plot_bgcolor="rgba(0,0,0,0)"
             )
-            # Menghilangkan gridline yang mengganggu
-            fig.update_xaxes(showgrid=False)
-            fig.update_yaxes(showgrid=False)
+            st.plotly_chart(fig_area, use_container_width=True)
+
+        # 2. HORIZONTAL BAR CHART (Proporsi Persentase)
+        with col_chart2:
+            st.caption("Proporsi Kategori (%)")
             
-            st.plotly_chart(fig, use_container_width=True)
+            # Hitung total untuk bulan ini (exclude Lainnya)
+            bar_data = df_chart.groupby('Kategori')['Nominal'].sum().reset_index()
+            total_filtered = bar_data['Nominal'].sum()
+            
+            # Tambah kolom Persentase
+            bar_data['Persen'] = (bar_data['Nominal'] / total_filtered) * 100
+            
+            # Sortir agar bar terbesar di paling atas
+            bar_data = bar_data.sort_values(by='Persen', ascending=True)
+
+            # Bar Chart Persentase
+            fig_bar = px.bar(
+                bar_data, 
+                x='Persen', 
+                y='Kategori', 
+                orientation='h', 
+                text=bar_data['Persen'].apply(lambda x: '{0:1.1f}%'.format(x)), # Format 12.5%
+                color='Kategori', 
+            )
+            
+            fig_bar.update_layout(
+                showlegend=False,
+                xaxis_title=None,
+                yaxis_title=None,
+                plot_bgcolor="rgba(0,0,0,0)",
+                margin=dict(t=0, b=0, l=0, r=0),
+                height=300
+            )
+            fig_bar.update_xaxes(showgrid=False, showticklabels=False) # Hilangkan angka axis bawah
+            fig_bar.update_yaxes(showgrid=False)
+            
+            st.plotly_chart(fig_bar, use_container_width=True)
     else:
-        st.info("Belum ada pengeluaran di bulan ini.")
+        st.info("Belum ada pengeluaran (selain kategori 'Lainnya') di bulan ini.")
 else:
     st.write("Tidak ada data untuk ditampilkan.")
 
