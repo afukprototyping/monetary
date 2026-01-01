@@ -3,23 +3,22 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
+import plotly.express as px  # Library baru untuk Pie Chart
 
 # --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Keuangan 2026", layout="wide")
+# REVISI: Mengubah page_title menjadi Financial Dashboard
+st.set_page_config(page_title="Financial Dashboard", layout="wide")
 
 # --- KONFIGURASI GOOGLE SHEETS ---
-# Pastikan nama ini SAMA PERSIS dengan nama file Google Sheet kamu
 SHEET_NAME = "Database Monetary Afuk"
 
-# --- BAGIAN KEAMANAN (PASSWORD DARI SECRETS) ---
+# --- BAGIAN KEAMANAN ---
 def check_password():
-    """Meminta password sebelum masuk."""
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
 
     if not st.session_state.password_correct:
         st.text_input("Masukkan Password:", type="password", key="password_input")
-        # Mengambil password dari Streamlit Secrets agar aman di Public Repo
         if st.session_state.password_input == st.secrets["PASSWORD_APP"]:
             st.session_state.password_correct = True
             st.rerun()
@@ -31,13 +30,11 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- FUNGSI KONEKSI DATABASE (GOOGLE SHEETS) ---
-# Menggunakan @st.cache_resource supaya koneksi tidak dibuat ulang terus menerus
+# --- FUNGSI KONEKSI DATABASE ---
 @st.cache_resource
 def connect_to_gsheets():
-    # Mengambil credentials dari Secrets
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds_dict = dict(st.secrets["gcp_service_account"]) # Konversi object secrets ke dict
+    creds_dict = dict(st.secrets["gcp_service_account"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
     return client
@@ -49,7 +46,6 @@ def load_data():
         data = sheet.get_all_records()
         df = pd.DataFrame(data)
         
-        # Jika sheet kosong (belum ada kolom), buat DataFrame kosong
         if df.empty:
             return pd.DataFrame(columns=['Tanggal', 'Tipe', 'Kategori', 'Sumber', 'Tujuan', 'Nominal', 'Catatan'])
         
@@ -57,26 +53,24 @@ def load_data():
         df['Tanggal'] = pd.to_datetime(df['Tanggal'], format='mixed')
         return df
     except gspread.exceptions.SpreadsheetNotFound:
-        st.error(f"❌ File Google Sheet '{SHEET_NAME}' tidak ditemukan. Pastikan nama sama & sudah dishare ke email Service Account.")
+        st.error(f"❌ File Google Sheet '{SHEET_NAME}' tidak ditemukan.")
         st.stop()
 
 def save_data(new_entry):
     client = connect_to_gsheets()
     sheet = client.open(SHEET_NAME).sheet1
     
-    # Jika baris pertama (header) belum ada, tulis dulu
     if len(sheet.get_all_values()) == 0:
         header = ['Tanggal', 'Tipe', 'Kategori', 'Sumber', 'Tujuan', 'Nominal', 'Catatan']
         sheet.append_row(header)
     
-    # Ubah format tanggal jadi string agar diterima Google Sheet
     row_values = [
         new_entry['Tanggal'].strftime("%Y-%m-%d"),
         new_entry['Tipe'],
         new_entry['Kategori'],
         new_entry['Sumber'],
         new_entry['Tujuan'],
-        int(new_entry['Nominal']),
+        new_entry['Nominal'],
         new_entry['Catatan']
     ]
     sheet.append_row(row_values)
@@ -85,7 +79,6 @@ def save_data(new_entry):
 # 🚀 APLIKASI UTAMA
 # ==========================================
 
-# Daftar Akun & Budget
 AKUN_LIST = ['BSI', 'Permata', 'BCA', 'Gopay', 'Cash', 'Tabungan/Investasi']
 BUDGET_PLAN = {
     'Makan': 1800000,
@@ -96,11 +89,30 @@ BUDGET_PLAN = {
     'Nabung': 700000
 }
 
-# REVISI 1: Judul Dashboard
-st.title("💰 Dashboard Keuangan")
+# --- LOAD DATA AWAL ---
+df = load_data()
 
-# 1. SIDEBAR: Input Transaksi
+st.title("💰 Financial Dashboard")
+
+# --- SIDEBAR ---
 with st.sidebar:
+    st.header("⚙️ Filter Data")
+    
+    # 1. Logic Filter Bulan (History)
+    # Ambil list bulan yang tersedia di data
+    if not df.empty:
+        df['Bulan_Tahun'] = df['Tanggal'].dt.strftime('%Y-%m')
+        available_months = sorted(df['Bulan_Tahun'].unique(), reverse=True)
+    else:
+        available_months = [datetime.now().strftime('%Y-%m')]
+
+    selected_month_str = st.selectbox("Pilih Bulan", available_months)
+    
+    # Konversi pilihan user (String "2026-01") balik ke angka tahun dan bulan
+    sel_year, sel_month = map(int, selected_month_str.split('-'))
+
+    st.divider()
+
     st.header("📝 Input Transaksi Baru")
     tgl = st.date_input("Tanggal", datetime.now())
     tipe = st.selectbox("Tipe", ["Expense (Pengeluaran)", "Income (Pemasukan)", "Transfer (Pindah Dana)"])
@@ -136,26 +148,18 @@ with st.sidebar:
         }
         with st.spinner("Menyimpan ke Google Sheets..."):
             save_data(entry)
-        st.success("Berhasil tersimpan di Database!")
-        # Gunakan st.rerun() dengan hati-hati agar tidak refresh berlebihan
-        st.cache_data.clear() # Clear cache agar data baru terbaca
+        st.success("Berhasil tersimpan!")
+        st.cache_data.clear()
         st.rerun()
 
-# --- PROSES DATA ---
-df = load_data()
-
-# Filter Data Bulan Ini
+# --- FILTER DATA BERDASARKAN PILIHAN USER ---
 if not df.empty:
-    current_month = datetime.now().month
-    current_year = datetime.now().year
-    df_month = df[(df['Tanggal'].dt.month == current_month) & (df['Tanggal'].dt.year == current_year)]
+    df_month = df[(df['Tanggal'].dt.month == sel_month) & (df['Tanggal'].dt.year == sel_year)]
 else:
     df_month = pd.DataFrame()
 
-# --- KPI SALDO (HARTA) ---
-# REVISI 2: Subheader dihapus
-# st.subheader("🏦 Posisi Saldo (Real-Time)") 
-
+# --- KPI SALDO (GLOBAL / TIDAK TERPENGARUH FILTER BULAN) ---
+# Saldo dihitung dari total sejarah transaksi, bukan cuma bulan ini
 saldo_cols = st.columns(len(AKUN_LIST))
 total_harta = 0
 
@@ -170,12 +174,14 @@ if not df.empty:
 else:
     st.info("Belum ada data transaksi.")
 
-# REVISI 3: Label Net Worth
-st.info(f"**Net Worth: Rp {total_harta:,.0f}**")
+st.info(f"**Net Worth Saat Ini: Rp {total_harta:,.0f}**")
 st.divider()
 
-# --- MONITORING BUDGET ---
-st.subheader(f"📉 Monitoring Budget (Bulan {datetime.now().month})")
+# --- MONITORING BUDGET (SESUAI BULAN YANG DIPILIH) ---
+# Mengambil nama bulan dari angka untuk judul
+nama_bulan = datetime(sel_year, sel_month, 1).strftime('%B %Y')
+st.subheader(f"📉 Monitoring Budget ({nama_bulan})")
+
 col_kiri, col_kanan = st.columns([2, 1])
 
 with col_kiri:
@@ -184,7 +190,6 @@ with col_kiri:
     if not df_month.empty:
         for kat, pagu in BUDGET_PLAN.items():
             terpakai = df_month[((df_month['Tipe'] == 'Expense') | (df_month['Tipe'] == 'Transfer')) & (df_month['Kategori'] == kat)]['Nominal'].sum()
-            sisa = pagu - terpakai
             persen = min(terpakai / pagu, 1.0) if pagu > 0 else 0
             total_spent_month += terpakai
             
@@ -193,7 +198,7 @@ with col_kiri:
             c1.progress(persen)
             c2.write(f"{terpakai:,.0f} / {pagu:,.0f}")
     else:
-        st.write("Belum ada data bulan ini.")
+        st.write("Belum ada data untuk bulan yang dipilih.")
 
 with col_kanan:
     sisa_total = total_budget - total_spent_month
@@ -203,13 +208,45 @@ with col_kanan:
 
 st.divider()
 
-# REVISI 4: Judul Expander
-with st.expander("Riwayat Transaksi"):
-    if not df.empty:
-        # REVISI 5: Format Tanggal Display (Hapus Jam)
-        df_display = df.copy()
+# --- FITUR BARU: VISUALISASI CHART ---
+st.subheader("📊 Analisis Pengeluaran")
+
+if not df_month.empty:
+    # Filter hanya data Expense untuk chart
+    df_chart = df_month[df_month['Tipe'] == 'Expense'].copy()
+    
+    if not df_chart.empty:
+        col_chart1, col_chart2 = st.columns([2, 1])
+
+        # 1. STACKED AREA CHART (Pengeluaran per Hari)
+        with col_chart1:
+            st.caption("Tren Pengeluaran Harian (Stacked)")
+            # Pivot data: Index=Tanggal, Kolom=Kategori, Value=Nominal
+            daily_chart = df_chart.pivot_table(index='Tanggal', columns='Kategori', values='Nominal', aggfunc='sum').fillna(0)
+            st.area_chart(daily_chart) # Area chart memberikan efek 'stacked line' yang visualnya bagus
+
+        # 2. PIE CHART (Proporsi Kategori)
+        with col_chart2:
+            st.caption("Proporsi Pengeluaran Sebulan")
+            # Group by Kategori
+            pie_data = df_chart.groupby('Kategori')['Nominal'].sum().reset_index()
+            
+            # Menggunakan Plotly Express untuk Pie Chart
+            fig = px.pie(pie_data, values='Nominal', names='Kategori', hole=0.4)
+            fig.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Belum ada pengeluaran (Expense) di bulan ini untuk ditampilkan di grafik.")
+else:
+    st.write("Tidak ada data chart.")
+
+st.divider()
+
+# --- RIWAYAT TRANSAKSI ---
+with st.expander(f"Riwayat Transaksi - {nama_bulan}"):
+    if not df_month.empty:
+        df_display = df_month.copy()
         df_display['Tanggal'] = df_display['Tanggal'].dt.strftime('%d-%m-%Y')
-        
         st.dataframe(df_display.sort_values(by='Tanggal', ascending=False), use_container_width=True)
     else:
-        st.dataframe(df, use_container_width=True)
+        st.write("Tidak ada data.")
