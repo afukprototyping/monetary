@@ -3,10 +3,9 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
-import plotly.express as px  # Library baru untuk Pie Chart
+import plotly.express as px  # Pastikan install: pip install plotly
 
 # --- KONFIGURASI HALAMAN ---
-# REVISI: Mengubah page_title menjadi Financial Dashboard
 st.set_page_config(page_title="Financial Dashboard", layout="wide")
 
 # --- KONFIGURASI GOOGLE SHEETS ---
@@ -99,7 +98,6 @@ with st.sidebar:
     st.header("⚙️ Filter Data")
     
     # 1. Logic Filter Bulan (History)
-    # Ambil list bulan yang tersedia di data
     if not df.empty:
         df['Bulan_Tahun'] = df['Tanggal'].dt.strftime('%Y-%m')
         available_months = sorted(df['Bulan_Tahun'].unique(), reverse=True)
@@ -107,8 +105,6 @@ with st.sidebar:
         available_months = [datetime.now().strftime('%Y-%m')]
 
     selected_month_str = st.selectbox("Pilih Bulan", available_months)
-    
-    # Konversi pilihan user (String "2026-01") balik ke angka tahun dan bulan
     sel_year, sel_month = map(int, selected_month_str.split('-'))
 
     st.divider()
@@ -152,14 +148,13 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- FILTER DATA BERDASARKAN PILIHAN USER ---
+# --- FILTER DATA UTAMA ---
 if not df.empty:
     df_month = df[(df['Tanggal'].dt.month == sel_month) & (df['Tanggal'].dt.year == sel_year)]
 else:
     df_month = pd.DataFrame()
 
-# --- KPI SALDO (GLOBAL / TIDAK TERPENGARUH FILTER BULAN) ---
-# Saldo dihitung dari total sejarah transaksi, bukan cuma bulan ini
+# --- KPI SALDO (GLOBAL) ---
 saldo_cols = st.columns(len(AKUN_LIST))
 total_harta = 0
 
@@ -177,8 +172,7 @@ else:
 st.info(f"**Net Worth Saat Ini: Rp {total_harta:,.0f}**")
 st.divider()
 
-# --- MONITORING BUDGET (SESUAI BULAN YANG DIPILIH) ---
-# Mengambil nama bulan dari angka untuk judul
+# --- MONITORING BUDGET (BULANAN) ---
 nama_bulan = datetime(sel_year, sel_month, 1).strftime('%B %Y')
 st.subheader(f"📉 Monitoring Budget ({nama_bulan})")
 
@@ -198,7 +192,7 @@ with col_kiri:
             c1.progress(persen)
             c2.write(f"{terpakai:,.0f} / {pagu:,.0f}")
     else:
-        st.write("Belum ada data untuk bulan yang dipilih.")
+        st.write("Belum ada data untuk bulan ini.")
 
 with col_kanan:
     sisa_total = total_budget - total_spent_month
@@ -208,41 +202,60 @@ with col_kanan:
 
 st.divider()
 
-# --- FITUR BARU: VISUALISASI CHART ---
+# --- CHART VISUALISASI ---
 st.subheader("📊 Analisis Pengeluaran")
 
 if not df_month.empty:
-    # Filter hanya data Expense untuk chart
     df_chart = df_month[df_month['Tipe'] == 'Expense'].copy()
     
     if not df_chart.empty:
         col_chart1, col_chart2 = st.columns([2, 1])
 
-        # 1. STACKED AREA CHART (Pengeluaran per Hari)
+        # 1. AREA CHART (Tren Harian) - Lebih Modern dari Line biasa
         with col_chart1:
-            st.caption("Tren Pengeluaran Harian (Stacked)")
-            # Pivot data: Index=Tanggal, Kolom=Kategori, Value=Nominal
+            st.caption("Tren Pengeluaran Harian")
             daily_chart = df_chart.pivot_table(index='Tanggal', columns='Kategori', values='Nominal', aggfunc='sum').fillna(0)
-            st.area_chart(daily_chart) # Area chart memberikan efek 'stacked line' yang visualnya bagus
+            st.area_chart(daily_chart)
 
-        # 2. PIE CHART (Proporsi Kategori)
+        # 2. HORIZONTAL BAR CHART (Proporsi Modern)
         with col_chart2:
-            st.caption("Proporsi Pengeluaran Sebulan")
-            # Group by Kategori
-            pie_data = df_chart.groupby('Kategori')['Nominal'].sum().reset_index()
+            st.caption("Top Kategori Pengeluaran")
             
-            # Menggunakan Plotly Express untuk Pie Chart
-            fig = px.pie(pie_data, values='Nominal', names='Kategori', hole=0.4)
-            fig.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
+            # Grouping dan Sorting Data
+            bar_data = df_chart.groupby('Kategori')['Nominal'].sum().reset_index().sort_values(by='Nominal', ascending=True)
+            
+            # Membuat Bar Chart Horizontal dengan Plotly
+            fig = px.bar(
+                bar_data, 
+                x='Nominal', 
+                y='Kategori', 
+                orientation='h', 
+                text_auto='.2s', # Format angka ringkas (cth: 1.5M, 200k)
+                color='Kategori', # Warna pembeda
+            )
+            
+            # Styling agar clean & modern
+            fig.update_layout(
+                showlegend=False, # Hilangkan legend karena sudah ada label Y-axis
+                xaxis_title=None,
+                yaxis_title=None,
+                plot_bgcolor="rgba(0,0,0,0)", # Background transparan
+                margin=dict(t=0, b=0, l=0, r=0),
+                height=300 # Tinggi disesuaikan agar pas
+            )
+            # Menghilangkan gridline yang mengganggu
+            fig.update_xaxes(showgrid=False)
+            fig.update_yaxes(showgrid=False)
+            
             st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("Belum ada pengeluaran (Expense) di bulan ini untuk ditampilkan di grafik.")
+        st.info("Belum ada pengeluaran di bulan ini.")
 else:
-    st.write("Tidak ada data chart.")
+    st.write("Tidak ada data untuk ditampilkan.")
 
 st.divider()
 
-# --- RIWAYAT TRANSAKSI ---
+# --- TABLE TRANSAKSI ---
 with st.expander(f"Riwayat Transaksi - {nama_bulan}"):
     if not df_month.empty:
         df_display = df_month.copy()
