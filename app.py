@@ -146,7 +146,7 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- FILTER DATA UTAMA ---
+# --- FILTER DATA UTAMA (BULANAN) ---
 if not df.empty:
     df_month = df[(df['Tanggal'].dt.month == sel_month) & (df['Tanggal'].dt.year == sel_year)]
 else:
@@ -204,77 +204,86 @@ st.divider()
 st.subheader("📊 Analisis Pengeluaran")
 
 if not df_month.empty:
-    # 1. Filter Data: Hanya Expense & Hapus Kategori 'Lainnya'
-    df_chart = df_month[
-        (df_month['Tipe'] == 'Expense') & 
-        (df_month['Kategori'] != 'Lainnya')
-    ].copy()
+    # 1. Ambil data Expense saja
+    df_expense = df_month[df_month['Tipe'] == 'Expense'].copy()
     
-    if not df_chart.empty:
-        col_chart1, col_chart2 = st.columns([2, 1])
+    if not df_expense.empty:
+        # --- FITUR INTERAKTIF (FILTER KATEGORI) ---
+        # Ini akan mengontrol KEDUA chart di bawahnya
+        unique_categories = df_expense['Kategori'].unique().tolist()
+        selected_categories = st.multiselect(
+            "🎛️ Filter Kategori (Pilih untuk ditampilkan):",
+            unique_categories,
+            default=unique_categories
+        )
 
-        # 1. AREA CHART (Updated to Plotly for Better Contrast)
-        with col_chart1:
-            st.caption("Tren Pengeluaran Harian")
-            # Grouping per tanggal dan kategori
-            daily_chart = df_chart.groupby(['Tanggal', 'Kategori'])['Nominal'].sum().reset_index()
-            
-            # Gunakan Plotly Area agar warna distinct & tidak overlap butek
-            fig_area = px.area(
-                daily_chart, 
-                x="Tanggal", 
-                y="Nominal", 
-                color="Kategori",
-                line_group="Kategori"
-            )
-            # Layout minimalis
-            fig_area.update_layout(
-                xaxis_title=None,
-                yaxis_title=None,
-                margin=dict(t=0, b=0, l=0, r=0),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                plot_bgcolor="rgba(0,0,0,0)"
-            )
-            st.plotly_chart(fig_area, use_container_width=True)
+        # Filter data berdasarkan pilihan user
+        df_chart = df_expense[df_expense['Kategori'].isin(selected_categories)]
 
-        # 2. HORIZONTAL BAR CHART (Proporsi Persentase)
-        with col_chart2:
-            st.caption("Proporsi Kategori (%)")
-            
-            # Hitung total untuk bulan ini (exclude Lainnya)
-            bar_data = df_chart.groupby('Kategori')['Nominal'].sum().reset_index()
-            total_filtered = bar_data['Nominal'].sum()
-            
-            # Tambah kolom Persentase
-            bar_data['Persen'] = (bar_data['Nominal'] / total_filtered) * 100
-            
-            # Sortir agar bar terbesar di paling atas
-            bar_data = bar_data.sort_values(by='Persen', ascending=True)
+        if not df_chart.empty:
+            col_chart1, col_chart2 = st.columns([2, 1])
 
-            # Bar Chart Persentase
-            fig_bar = px.bar(
-                bar_data, 
-                x='Persen', 
-                y='Kategori', 
-                orientation='h', 
-                text=bar_data['Persen'].apply(lambda x: '{0:1.1f}%'.format(x)), # Format 12.5%
-                color='Kategori', 
-            )
-            
-            fig_bar.update_layout(
-                showlegend=False,
-                xaxis_title=None,
-                yaxis_title=None,
-                plot_bgcolor="rgba(0,0,0,0)",
-                margin=dict(t=0, b=0, l=0, r=0),
-                height=300
-            )
-            fig_bar.update_xaxes(showgrid=False, showticklabels=False) # Hilangkan angka axis bawah
-            fig_bar.update_yaxes(showgrid=False)
-            
-            st.plotly_chart(fig_bar, use_container_width=True)
+            # 1. LINE CHART (Tren Harian Biasa)
+            # Menggunakan Line Chart biasa agar lebih clear dan tidak aneh
+            with col_chart1:
+                st.caption("Tren Pengeluaran Harian")
+                # Grouping
+                daily_chart = df_chart.groupby(['Tanggal', 'Kategori'])['Nominal'].sum().reset_index()
+                
+                fig_line = px.line(
+                    daily_chart, 
+                    x="Tanggal", 
+                    y="Nominal", 
+                    color="Kategori",
+                    markers=True, # Pakai titik agar jelas posisi datanya
+                    title=None
+                )
+                fig_line.update_layout(
+                    xaxis_title=None,
+                    yaxis_title=None,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    hovermode="x unified" # Hover satu garis vertikal untuk liat semua kategori di tanggal itu
+                )
+                fig_line.update_yaxes(showgrid=True, gridcolor='rgba(200,200,200,0.2)')
+                st.plotly_chart(fig_line, use_container_width=True)
+
+            # 2. HORIZONTAL BAR CHART (Proporsi)
+            # Data ini juga ikut berubah sesuai filter di atas
+            with col_chart2:
+                st.caption("Proporsi Kategori (%)")
+                
+                bar_data = df_chart.groupby('Kategori')['Nominal'].sum().reset_index()
+                total_filtered = bar_data['Nominal'].sum()
+                
+                bar_data['Persen'] = (bar_data['Nominal'] / total_filtered) * 100
+                bar_data = bar_data.sort_values(by='Persen', ascending=True)
+
+                fig_bar = px.bar(
+                    bar_data, 
+                    x='Persen', 
+                    y='Kategori', 
+                    orientation='h', 
+                    text=bar_data['Persen'].apply(lambda x: '{0:1.1f}%'.format(x)),
+                    color='Kategori', 
+                )
+                
+                fig_bar.update_layout(
+                    showlegend=False,
+                    xaxis_title=None,
+                    yaxis_title=None,
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    margin=dict(t=0, b=0, l=0, r=0),
+                    height=300
+                )
+                fig_bar.update_xaxes(showgrid=False, showticklabels=False)
+                fig_bar.update_yaxes(showgrid=False)
+                
+                st.plotly_chart(fig_bar, use_container_width=True)
+        else:
+            st.warning("⚠️ Tidak ada kategori yang dipilih.")
     else:
-        st.info("Belum ada pengeluaran (selain kategori 'Lainnya') di bulan ini.")
+        st.info("Belum ada pengeluaran di bulan ini.")
 else:
     st.write("Tidak ada data untuk ditampilkan.")
 
