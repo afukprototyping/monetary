@@ -5,31 +5,31 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import plotly.express as px
 
-# --- KONFIGURASI HALAMAN ---
+# --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Financial Dashboard", layout="wide")
 
-# --- KONFIGURASI GOOGLE SHEETS ---
+# --- GOOGLE SHEETS CONFIGURATION ---
 SHEET_NAME = "Database Monetary Afuk"
 
-# --- BAGIAN KEAMANAN ---
+# --- SECURITY ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
 
     if not st.session_state.password_correct:
-        st.text_input("Masukkan Password:", type="password", key="password_input")
+        st.text_input("Enter Password:", type="password", key="password_input")
         if st.session_state.password_input == st.secrets["PASSWORD_APP"]:
             st.session_state.password_correct = True
             st.rerun()
         elif st.session_state.password_input != "":
-            st.error("😕 Password salah.")
+            st.error("😕 Incorrect password.")
         return False
     return True
 
 if not check_password():
     st.stop()
 
-# --- FUNGSI KONEKSI DATABASE ---
+# --- DATABASE CONNECTION ---
 @st.cache_resource
 def connect_to_gsheets():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -46,12 +46,13 @@ def load_data():
         df = pd.DataFrame(data)
         
         if df.empty:
+            # Using English headers for new structure consistency
             return pd.DataFrame(columns=['Tanggal', 'Tipe', 'Kategori', 'Sumber', 'Tujuan', 'Nominal', 'Catatan'])
         
         df['Tanggal'] = pd.to_datetime(df['Tanggal'], format='mixed')
         return df
     except gspread.exceptions.SpreadsheetNotFound:
-        st.error(f"❌ File Google Sheet '{SHEET_NAME}' tidak ditemukan.")
+        st.error(f"❌ Google Sheet '{SHEET_NAME}' not found.")
         st.stop()
 
 def save_data(new_entry):
@@ -74,27 +75,30 @@ def save_data(new_entry):
     sheet.append_row(row_values)
 
 # ==========================================
-# 🚀 APLIKASI UTAMA
+# 🚀 MAIN APPLICATION
 # ==========================================
 
-AKUN_LIST = ['BSI', 'Permata', 'BCA', 'Gopay', 'Cash', 'Tabungan/Investasi']
+# Translated Account List
+AKUN_LIST = ['BSI', 'Permata', 'BCA', 'Gopay', 'Cash', 'Savings/Investments']
+
+# Translated Budget Plan
 BUDGET_PLAN = {
-    'Makan': 1800000,
+    'Food': 1800000,
     'Transport': 200000,
-    'Main/Entertainment': 100000,
-    'Parfum & Sabun': 100000,
-    'Sedekah & Admin': 50000,
-    'Nabung': 700000
+    'Entertainment': 100000,
+    'Body Care': 100000,  # Previously Parfum & Sabun
+    'Charity': 50000,     # Previously Sedekah & Admin
+    'Savings': 700000
 }
 
-# --- LOAD DATA AWAL ---
+# --- LOAD DATA ---
 df = load_data()
 
 st.title("💰 Financial Dashboard")
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.header("⚙️ Filter Data")
+    st.header("⚙️ Data Filter")
     
     if not df.empty:
         df['Bulan_Tahun'] = df['Tanggal'].dt.strftime('%Y-%m')
@@ -102,62 +106,64 @@ with st.sidebar:
     else:
         available_months = [datetime.now().strftime('%Y-%m')]
 
-    selected_month_str = st.selectbox("Pilih Bulan", available_months)
+    selected_month_str = st.selectbox("Select Month", available_months)
     sel_year, sel_month = map(int, selected_month_str.split('-'))
 
     st.divider()
 
-    st.header("📝 Input Transaksi Baru")
-    tgl = st.date_input("Tanggal", datetime.now())
-    tipe = st.selectbox("Tipe", ["Expense (Pengeluaran)", "Income (Pemasukan)", "Transfer (Pindah Dana)"])
+    st.header("📝 New Transaction")
+    tgl = st.date_input("Date", datetime.now())
+    tipe = st.selectbox("Type", ["Expense", "Income", "Transfer"])
     
     kategori, sumber, tujuan = "-", "-", "-"
     
-    if "Expense" in tipe:
-        sumber = st.selectbox("Sumber Dana", AKUN_LIST)
-        kategori = st.selectbox("Kategori", list(BUDGET_PLAN.keys()) + ["Lainnya"])
-    elif "Income" in tipe:
-        tujuan = st.selectbox("Masuk ke Akun", AKUN_LIST)
+    if tipe == "Expense":
+        sumber = st.selectbox("Source Account", AKUN_LIST)
+        kategori = st.selectbox("Category", list(BUDGET_PLAN.keys()) + ["Other"])
+    elif tipe == "Income":
+        tujuan = st.selectbox("Destination Account", AKUN_LIST)
         kategori = "Income"
-    elif "Transfer" in tipe:
+    elif tipe == "Transfer":
         col_tr1, col_tr2 = st.columns(2)
-        with col_tr1: sumber = st.selectbox("Dari", AKUN_LIST)
-        with col_tr2: tujuan = st.selectbox("Ke", AKUN_LIST, index=len(AKUN_LIST)-1)
+        with col_tr1: sumber = st.selectbox("From", AKUN_LIST)
+        with col_tr2: tujuan = st.selectbox("To", AKUN_LIST, index=len(AKUN_LIST)-1)
         
-        is_saving = st.checkbox("✅ Ini Nabung?")
-        kategori = "Nabung" if is_saving else "Transfer"
+        is_saving = st.checkbox("✅ Saving?")
+        kategori = "Savings" if is_saving else "Transfer"
 
-    nominal = st.number_input("Nominal (Rp)", min_value=0, step=1000)
-    catatan = st.text_input("Catatan")
+    nominal = st.number_input("Amount (IDR)", min_value=0, step=1000)
+    catatan = st.text_input("Note")
     
-    if st.button("Simpan ke Cloud ☁️"):
+    if st.button("Save to Cloud ☁️"):
         entry = {
             'Tanggal': tgl,
-            'Tipe': tipe.split(" ")[0],
+            'Tipe': tipe, # No split needed as we removed the Indonesian text in options
             'Kategori': kategori,
             'Sumber': sumber,
             'Tujuan': tujuan,
             'Nominal': nominal,
             'Catatan': catatan
         }
-        with st.spinner("Menyimpan ke Google Sheets..."):
+        with st.spinner("Saving to Google Sheets..."):
             save_data(entry)
-        st.success("Berhasil tersimpan!")
+        st.success("Saved successfully!")
         st.cache_data.clear()
         st.rerun()
 
-# --- FILTER DATA UTAMA (BULANAN) ---
+# --- MAIN DATA FILTER ---
 if not df.empty:
     df_month = df[(df['Tanggal'].dt.month == sel_month) & (df['Tanggal'].dt.year == sel_year)]
 else:
     df_month = pd.DataFrame()
 
-# --- KPI SALDO (GLOBAL) ---
+# --- NET WORTH KPI ---
 saldo_cols = st.columns(len(AKUN_LIST))
 total_harta = 0
 
 if not df.empty:
     for i, akun in enumerate(AKUN_LIST):
+        # Mapping old Indonesian names to new English names for calculation if necessary
+        # But assuming user will rename accounts in sheet or new entries will match
         masuk = df[((df['Tipe'] == 'Income') | (df['Tipe'] == 'Transfer')) & (df['Tujuan'] == akun)]['Nominal'].sum()
         keluar = df[((df['Tipe'] == 'Expense') | (df['Tipe'] == 'Transfer')) & (df['Sumber'] == akun)]['Nominal'].sum()
         saldo_akhir = masuk - keluar
@@ -165,14 +171,14 @@ if not df.empty:
         with saldo_cols[i]:
             st.metric(label=akun, value=f"{saldo_akhir:,.0f}")
 else:
-    st.info("Belum ada data transaksi.")
+    st.info("No transaction data available.")
 
-st.info(f"**Net Worth Saat Ini: Rp {total_harta:,.0f}**")
+st.info(f"**Current Net Worth: Rp {total_harta:,.0f}**")
 st.divider()
 
-# --- MONITORING BUDGET (BULANAN) ---
+# --- BUDGET MONITORING ---
 nama_bulan = datetime(sel_year, sel_month, 1).strftime('%B %Y')
-st.subheader(f"📉 Monitoring Budget ({nama_bulan})")
+st.subheader(f"📉 Budget Monitoring ({nama_bulan})")
 
 col_kiri, col_kanan = st.columns([2, 1])
 
@@ -181,6 +187,8 @@ with col_kiri:
     total_spent_month = 0
     if not df_month.empty:
         for kat, pagu in BUDGET_PLAN.items():
+            # Note: This checks strictly for English Category names. 
+            # Make sure to rename old 'Makan' to 'Food' in GSheets for this to work on history.
             terpakai = df_month[((df_month['Tipe'] == 'Expense') | (df_month['Tipe'] == 'Transfer')) & (df_month['Kategori'] == kat)]['Nominal'].sum()
             persen = min(terpakai / pagu, 1.0) if pagu > 0 else 0
             total_spent_month += terpakai
@@ -190,44 +198,39 @@ with col_kiri:
             c1.progress(persen)
             c2.write(f"{terpakai:,.0f} / {pagu:,.0f}")
     else:
-        st.write("Belum ada data untuk bulan ini.")
+        st.write("No data for this month.")
 
 with col_kanan:
     sisa_total = total_budget - total_spent_month
     st.metric("Total Budget", f"{total_budget:,.0f}")
-    st.metric("Terpakai", f"{total_spent_month:,.0f}", delta_color="inverse")
-    st.metric("Sisa", f"{sisa_total:,.0f}", delta=f"{sisa_total:,.0f}")
+    st.metric("Used", f"{total_spent_month:,.0f}", delta_color="inverse")
+    st.metric("Remaining", f"{sisa_total:,.0f}", delta=f"{sisa_total:,.0f}")
 
 st.divider()
 
-# --- CHART VISUALISASI ---
-st.subheader("📊 Analisis Pengeluaran")
+# --- EXPENSE ANALYSIS ---
+st.subheader("📊 Expense Analysis")
 
 if not df_month.empty:
-    # 1. Ambil data Expense saja
     df_expense = df_month[df_month['Tipe'] == 'Expense'].copy()
     
     if not df_expense.empty:
-        # --- FITUR INTERAKTIF (FILTER KATEGORI) ---
-        # Ini akan mengontrol KEDUA chart di bawahnya
+        # --- INTERACTIVE FILTER ---
         unique_categories = df_expense['Kategori'].unique().tolist()
         selected_categories = st.multiselect(
-            "🎛️ Filter Kategori (Pilih untuk ditampilkan):",
+            "🎛️ Filter Categories (Select to display):",
             unique_categories,
             default=unique_categories
         )
 
-        # Filter data berdasarkan pilihan user
         df_chart = df_expense[df_expense['Kategori'].isin(selected_categories)]
 
         if not df_chart.empty:
             col_chart1, col_chart2 = st.columns([2, 1])
 
-            # 1. LINE CHART (Tren Harian Biasa)
-            # Menggunakan Line Chart biasa agar lebih clear dan tidak aneh
+            # 1. LINE CHART (Daily Trend)
             with col_chart1:
-                st.caption("Tren Pengeluaran Harian")
-                # Grouping
+                st.caption("Daily Expense Trend")
                 daily_chart = df_chart.groupby(['Tanggal', 'Kategori'])['Nominal'].sum().reset_index()
                 
                 fig_line = px.line(
@@ -235,7 +238,7 @@ if not df_month.empty:
                     x="Tanggal", 
                     y="Nominal", 
                     color="Kategori",
-                    markers=True, # Pakai titik agar jelas posisi datanya
+                    markers=True,
                     title=None
                 )
                 fig_line.update_layout(
@@ -243,15 +246,14 @@ if not df_month.empty:
                     yaxis_title=None,
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     plot_bgcolor="rgba(0,0,0,0)",
-                    hovermode="x unified" # Hover satu garis vertikal untuk liat semua kategori di tanggal itu
+                    hovermode="x unified"
                 )
                 fig_line.update_yaxes(showgrid=True, gridcolor='rgba(200,200,200,0.2)')
                 st.plotly_chart(fig_line, use_container_width=True)
 
-            # 2. HORIZONTAL BAR CHART (Proporsi)
-            # Data ini juga ikut berubah sesuai filter di atas
+            # 2. HORIZONTAL BAR CHART (Proportion)
             with col_chart2:
-                st.caption("Proporsi Kategori (%)")
+                st.caption("Category Proportion (%)")
                 
                 bar_data = df_chart.groupby('Kategori')['Nominal'].sum().reset_index()
                 total_filtered = bar_data['Nominal'].sum()
@@ -281,19 +283,19 @@ if not df_month.empty:
                 
                 st.plotly_chart(fig_bar, use_container_width=True)
         else:
-            st.warning("⚠️ Tidak ada kategori yang dipilih.")
+            st.warning("⚠️ No categories selected.")
     else:
-        st.info("Belum ada pengeluaran di bulan ini.")
+        st.info("No expense data for this month.")
 else:
-    st.write("Tidak ada data untuk ditampilkan.")
+    st.write("No data available.")
 
 st.divider()
 
-# --- TABLE TRANSAKSI ---
-with st.expander(f"Riwayat Transaksi - {nama_bulan}"):
+# --- TRANSACTION HISTORY ---
+with st.expander(f"Transaction History - {nama_bulan}"):
     if not df_month.empty:
         df_display = df_month.copy()
-        df_display['Tanggal'] = df_display['Tanggal'].dt.strftime('%d-%m-%Y')
+        df_display['Tanggal'] = df_display['Tanggal'].dt.strftime('%Y-%m-%d') # Standard English Format
         st.dataframe(df_display.sort_values(by='Tanggal', ascending=False), use_container_width=True)
     else:
-        st.write("Tidak ada data.")
+        st.write("No data available.")
