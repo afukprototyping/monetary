@@ -46,7 +46,6 @@ def load_data():
         df = pd.DataFrame(data)
         
         if df.empty:
-            # Using English headers for new structure consistency
             return pd.DataFrame(columns=['Tanggal', 'Tipe', 'Kategori', 'Sumber', 'Tujuan', 'Nominal', 'Catatan'])
         
         df['Tanggal'] = pd.to_datetime(df['Tanggal'], format='mixed')
@@ -55,40 +54,51 @@ def load_data():
         st.error(f"❌ Google Sheet '{SHEET_NAME}' not found.")
         st.stop()
 
-def save_data(new_entry):
+def save_data(entries):
+    """
+    Revised to accept a LIST of entries to support Split Bill.
+    """
     client = connect_to_gsheets()
     sheet = client.open(SHEET_NAME).sheet1
     
+    # Initialize header if empty
     if len(sheet.get_all_values()) == 0:
         header = ['Tanggal', 'Tipe', 'Kategori', 'Sumber', 'Tujuan', 'Nominal', 'Catatan']
         sheet.append_row(header)
     
-    row_values = [
-        new_entry['Tanggal'].strftime("%Y-%m-%d"),
-        new_entry['Tipe'],
-        new_entry['Kategori'],
-        new_entry['Sumber'],
-        new_entry['Tujuan'],
-        new_entry['Nominal'],
-        new_entry['Catatan']
-    ]
-    sheet.append_row(row_values)
+    # Prepare rows for bulk update (more efficient)
+    rows_to_append = []
+    for entry in entries:
+        row_values = [
+            entry['Tanggal'].strftime("%Y-%m-%d"),
+            entry['Tipe'],
+            entry['Kategori'],
+            entry['Sumber'],
+            entry['Tujuan'],
+            entry['Nominal'],
+            entry['Catatan']
+        ]
+        rows_to_append.append(row_values)
+    
+    # Write to sheet
+    for row in rows_to_append:
+        sheet.append_row(row)
 
 # ==========================================
 # 🚀 MAIN APPLICATION
 # ==========================================
 
-# Translated Account List
 AKUN_LIST = ['BSI', 'Permata', 'BCA', 'Gopay', 'Cash', 'Savings/Investments']
 
-# Translated Budget Plan
+# Update: Added 'Receivables' for money owed by friends
 BUDGET_PLAN = {
     'Food': 1800000,
     'Transport': 200000,
     'Entertainment': 100000,
-    'Body Care': 100000,  # Previously Parfum & Sabun
-    'Charity': 50000,     # Previously Sedekah & Admin
-    'Savings': 700000
+    'Body Care': 100000,
+    'Charity': 50000,
+    'Savings': 700000,
+    'Receivables': 0 # Budget 0 because it's not a real expense, just temporary
 }
 
 # --- LOAD DATA ---
@@ -117,12 +127,83 @@ with st.sidebar:
     
     kategori, sumber, tujuan = "-", "-", "-"
     
+    # Variable to hold list of entries to save
+    entries_to_save = []
+    
     if tipe == "Expense":
         sumber = st.selectbox("Source Account", AKUN_LIST)
-        kategori = st.selectbox("Category", list(BUDGET_PLAN.keys()) + ["Other"])
+        
+        # --- SPLIT BILL LOGIC ---
+        is_split = st.checkbox("🧩 Split Bill? (Nalangin Teman)")
+        
+        if is_split:
+            st.info("💡 Calculation: Total Bill = My Part + Friends' Part")
+            col_split1, col_split2 = st.columns(2)
+            
+            with col_split1:
+                total_bill = st.number_input("Total Bill Paid", min_value=0, step=1000)
+            with col_split2:
+                my_part = st.number_input("My Portion", min_value=0, step=1000, max_value=total_bill)
+            
+            friends_part = total_bill - my_part
+            st.caption(f"👉 **Receivables (Piutang):** Rp {friends_part:,.0f}")
+            
+            # Input Category for MY portion
+            kategori = st.selectbox("Category (For My Portion)", list(BUDGET_PLAN.keys()) + ["Other"])
+            catatan = st.text_input("Note")
+            
+            # Button Logic for Split Bill
+            if st.button("Save Split Transaction ☁️"):
+                if total_bill > 0:
+                    # Entry 1: My Expense
+                    entries_to_save.append({
+                        'Tanggal': tgl, 'Tipe': 'Expense', 'Kategori': kategori,
+                        'Sumber': sumber, 'Tujuan': '-', 'Nominal': my_part,
+                        'Catatan': f"{catatan} (My Part)"
+                    })
+                    
+                    # Entry 2: Receivables (Only if friend owes > 0)
+                    if friends_part > 0:
+                        entries_to_save.append({
+                            'Tanggal': tgl, 'Tipe': 'Expense', 'Kategori': 'Receivables',
+                            'Sumber': sumber, 'Tujuan': '-', 'Nominal': friends_part,
+                            'Catatan': f"{catatan} (Piutang)"
+                        })
+        
+        else:
+            # Normal Expense
+            kategori = st.selectbox("Category", list(BUDGET_PLAN.keys()) + ["Other"])
+            nominal = st.number_input("Amount (IDR)", min_value=0, step=1000)
+            catatan = st.text_input("Note")
+            
+            if st.button("Save to Cloud ☁️"):
+                entries_to_save.append({
+                    'Tanggal': tgl, 'Tipe': 'Expense', 'Kategori': kategori,
+                    'Sumber': sumber, 'Tujuan': '-', 'Nominal': nominal,
+                    'Catatan': catatan
+                })
+
     elif tipe == "Income":
         tujuan = st.selectbox("Destination Account", AKUN_LIST)
-        kategori = "Income"
+        
+        # Special case: Friend paying back debt
+        is_debt_repayment = st.checkbox("🔄 Debt Repayment (Teman Bayar Utang)?")
+        if is_debt_repayment:
+            kategori = "Receivables" # Using same category to net-off expenses later if needed
+            st.caption("This will be recorded as Income with Category 'Receivables'")
+        else:
+            kategori = "Income"
+            
+        nominal = st.number_input("Amount (IDR)", min_value=0, step=1000)
+        catatan = st.text_input("Note")
+        
+        if st.button("Save to Cloud ☁️"):
+            entries_to_save.append({
+                'Tanggal': tgl, 'Tipe': 'Income', 'Kategori': kategori,
+                'Sumber': '-', 'Tujuan': tujuan, 'Nominal': nominal,
+                'Catatan': catatan
+            })
+
     elif tipe == "Transfer":
         col_tr1, col_tr2 = st.columns(2)
         with col_tr1: sumber = st.selectbox("From", AKUN_LIST)
@@ -130,23 +211,22 @@ with st.sidebar:
         
         is_saving = st.checkbox("✅ Saving?")
         kategori = "Savings" if is_saving else "Transfer"
+        
+        nominal = st.number_input("Amount (IDR)", min_value=0, step=1000)
+        catatan = st.text_input("Note")
+        
+        if st.button("Save to Cloud ☁️"):
+            entries_to_save.append({
+                'Tanggal': tgl, 'Tipe': 'Transfer', 'Kategori': kategori,
+                'Sumber': sumber, 'Tujuan': tujuan, 'Nominal': nominal,
+                'Catatan': catatan
+            })
 
-    nominal = st.number_input("Amount (IDR)", min_value=0, step=1000)
-    catatan = st.text_input("Note")
-    
-    if st.button("Save to Cloud ☁️"):
-        entry = {
-            'Tanggal': tgl,
-            'Tipe': tipe, # No split needed as we removed the Indonesian text in options
-            'Kategori': kategori,
-            'Sumber': sumber,
-            'Tujuan': tujuan,
-            'Nominal': nominal,
-            'Catatan': catatan
-        }
+    # --- FINAL SAVE EXECUTION ---
+    if entries_to_save:
         with st.spinner("Saving to Google Sheets..."):
-            save_data(entry)
-        st.success("Saved successfully!")
+            save_data(entries_to_save)
+        st.success("Transaction(s) saved successfully!")
         st.cache_data.clear()
         st.rerun()
 
@@ -162,8 +242,6 @@ total_harta = 0
 
 if not df.empty:
     for i, akun in enumerate(AKUN_LIST):
-        # Mapping old Indonesian names to new English names for calculation if necessary
-        # But assuming user will rename accounts in sheet or new entries will match
         masuk = df[((df['Tipe'] == 'Income') | (df['Tipe'] == 'Transfer')) & (df['Tujuan'] == akun)]['Nominal'].sum()
         keluar = df[((df['Tipe'] == 'Expense') | (df['Tipe'] == 'Transfer')) & (df['Sumber'] == akun)]['Nominal'].sum()
         saldo_akhir = masuk - keluar
@@ -183,12 +261,14 @@ st.subheader(f"📉 Budget Monitoring ({nama_bulan})")
 col_kiri, col_kanan = st.columns([2, 1])
 
 with col_kiri:
-    total_budget = sum(BUDGET_PLAN.values())
+    # We exclude 'Receivables' from Total Budget Calculation because it's not real spending plan
+    real_budget_plan = {k: v for k, v in BUDGET_PLAN.items() if k != 'Receivables'}
+    total_budget = sum(real_budget_plan.values())
     total_spent_month = 0
+    
     if not df_month.empty:
-        for kat, pagu in BUDGET_PLAN.items():
-            # Note: This checks strictly for English Category names. 
-            # Make sure to rename old 'Makan' to 'Food' in GSheets for this to work on history.
+        # Loop only through Real Budget Categories (Food, Transport, etc.)
+        for kat, pagu in real_budget_plan.items():
             terpakai = df_month[((df_month['Tipe'] == 'Expense') | (df_month['Tipe'] == 'Transfer')) & (df_month['Kategori'] == kat)]['Nominal'].sum()
             persen = min(terpakai / pagu, 1.0) if pagu > 0 else 0
             total_spent_month += terpakai
@@ -205,6 +285,12 @@ with col_kanan:
     st.metric("Total Budget", f"{total_budget:,.0f}")
     st.metric("Used", f"{total_spent_month:,.0f}", delta_color="inverse")
     st.metric("Remaining", f"{sisa_total:,.0f}", delta=f"{sisa_total:,.0f}")
+    
+    # Show Receivables separately
+    if not df_month.empty:
+        total_piutang = df_month[(df_month['Tipe'] == 'Expense') & (df_month['Kategori'] == 'Receivables')]['Nominal'].sum()
+        st.divider()
+        st.metric("💰 Unpaid Debt (Receivables)", f"{total_piutang:,.0f}", help="Money you paid for others this month")
 
 st.divider()
 
@@ -215,12 +301,16 @@ if not df_month.empty:
     df_expense = df_month[df_month['Tipe'] == 'Expense'].copy()
     
     if not df_expense.empty:
-        # --- INTERACTIVE FILTER ---
         unique_categories = df_expense['Kategori'].unique().tolist()
+        
+        # Default: Select all except 'Receivables' so it doesn't skew the daily chart
+        default_selection = [c for c in unique_categories if c != 'Receivables']
+        if not default_selection: default_selection = unique_categories # Fallback
+
         selected_categories = st.multiselect(
             "🎛️ Filter Categories (Select to display):",
             unique_categories,
-            default=unique_categories
+            default=default_selection
         )
 
         df_chart = df_expense[df_expense['Kategori'].isin(selected_categories)]
@@ -228,59 +318,40 @@ if not df_month.empty:
         if not df_chart.empty:
             col_chart1, col_chart2 = st.columns([2, 1])
 
-            # 1. LINE CHART (Daily Trend)
             with col_chart1:
                 st.caption("Daily Expense Trend")
                 daily_chart = df_chart.groupby(['Tanggal', 'Kategori'])['Nominal'].sum().reset_index()
                 
                 fig_line = px.line(
-                    daily_chart, 
-                    x="Tanggal", 
-                    y="Nominal", 
-                    color="Kategori",
-                    markers=True,
-                    title=None
+                    daily_chart, x="Tanggal", y="Nominal", color="Kategori",
+                    markers=True, title=None
                 )
                 fig_line.update_layout(
-                    xaxis_title=None,
-                    yaxis_title=None,
+                    xaxis_title=None, yaxis_title=None,
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    hovermode="x unified"
+                    plot_bgcolor="rgba(0,0,0,0)", hovermode="x unified"
                 )
                 fig_line.update_yaxes(showgrid=True, gridcolor='rgba(200,200,200,0.2)')
                 st.plotly_chart(fig_line, use_container_width=True)
 
-            # 2. HORIZONTAL BAR CHART (Proportion)
             with col_chart2:
                 st.caption("Category Proportion (%)")
-                
                 bar_data = df_chart.groupby('Kategori')['Nominal'].sum().reset_index()
                 total_filtered = bar_data['Nominal'].sum()
-                
                 bar_data['Persen'] = (bar_data['Nominal'] / total_filtered) * 100
                 bar_data = bar_data.sort_values(by='Persen', ascending=True)
 
                 fig_bar = px.bar(
-                    bar_data, 
-                    x='Persen', 
-                    y='Kategori', 
-                    orientation='h', 
+                    bar_data, x='Persen', y='Kategori', orientation='h',
                     text=bar_data['Persen'].apply(lambda x: '{0:1.1f}%'.format(x)),
                     color='Kategori', 
                 )
-                
                 fig_bar.update_layout(
-                    showlegend=False,
-                    xaxis_title=None,
-                    yaxis_title=None,
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    margin=dict(t=0, b=0, l=0, r=0),
-                    height=300
+                    showlegend=False, xaxis_title=None, yaxis_title=None,
+                    plot_bgcolor="rgba(0,0,0,0)", margin=dict(t=0, b=0, l=0, r=0), height=300
                 )
                 fig_bar.update_xaxes(showgrid=False, showticklabels=False)
                 fig_bar.update_yaxes(showgrid=False)
-                
                 st.plotly_chart(fig_bar, use_container_width=True)
         else:
             st.warning("⚠️ No categories selected.")
@@ -295,7 +366,7 @@ st.divider()
 with st.expander(f"Transaction History - {nama_bulan}"):
     if not df_month.empty:
         df_display = df_month.copy()
-        df_display['Tanggal'] = df_display['Tanggal'].dt.strftime('%Y-%m-%d') # Standard English Format
+        df_display['Tanggal'] = df_display['Tanggal'].dt.strftime('%Y-%m-%d')
         st.dataframe(df_display.sort_values(by='Tanggal', ascending=False), use_container_width=True)
     else:
         st.write("No data available.")
