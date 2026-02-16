@@ -134,10 +134,9 @@ with st.sidebar:
         sumber = st.selectbox("Source Account", AKUN_LIST)
         
         # --- SPLIT BILL LOGIC ---
-        is_split = st.checkbox("🧩 Split Bill? (Nalangin Teman)")
+        is_split = st.checkbox("Split Bill")
         
         if is_split:
-            st.info("💡 Calculation: Total Bill = My Part + Friends' Part")
             col_split1, col_split2 = st.columns(2)
             
             with col_split1:
@@ -146,7 +145,7 @@ with st.sidebar:
                 my_part = st.number_input("My Portion", min_value=0, step=1000, max_value=total_bill)
             
             friends_part = total_bill - my_part
-            st.caption(f"👉 **Receivables (Piutang):** Rp {friends_part:,.0f}")
+            st.caption(f"**Receivables:** Rp {friends_part:,.0f}")
             
             # Input Category for MY portion
             kategori = st.selectbox("Category (For My Portion)", list(BUDGET_PLAN.keys()) + ["Other"])
@@ -187,7 +186,7 @@ with st.sidebar:
         tujuan = st.selectbox("Destination Account", AKUN_LIST)
         
         # Special case: Friend paying back debt
-        is_debt_repayment = st.checkbox("🔄 Debt Repayment (Teman Bayar Utang)?")
+        is_debt_repayment = st.checkbox("Debt Repayment")
         if is_debt_repayment:
             kategori = "Receivables" # Using same category to net-off expenses later if needed
             st.caption("This will be recorded as Income with Category 'Receivables'")
@@ -370,3 +369,4 @@ with st.expander(f"Transaction History - {nama_bulan}"):
         st.dataframe(df_display.sort_values(by='Tanggal', ascending=False), use_container_width=True)
     else:
         st.write("No data available.")
+
