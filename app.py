@@ -55,18 +55,13 @@ def load_data():
         st.stop()
 
 def save_data(entries):
-    """
-    Revised to accept a LIST of entries to support Split Bill.
-    """
     client = connect_to_gsheets()
     sheet = client.open(SHEET_NAME).sheet1
     
-    # Initialize header if empty
     if len(sheet.get_all_values()) == 0:
         header = ['Tanggal', 'Tipe', 'Kategori', 'Sumber', 'Tujuan', 'Nominal', 'Catatan']
         sheet.append_row(header)
     
-    # Prepare rows for bulk update (more efficient)
     rows_to_append = []
     for entry in entries:
         row_values = [
@@ -80,7 +75,6 @@ def save_data(entries):
         ]
         rows_to_append.append(row_values)
     
-    # Write to sheet
     for row in rows_to_append:
         sheet.append_row(row)
 
@@ -90,7 +84,6 @@ def save_data(entries):
 
 AKUN_LIST = ['BSI', 'Permata', 'BCA', 'Gopay', 'Cash', 'Savings/Investments']
 
-# Update: Added 'Receivables' for money owed by friends
 BUDGET_PLAN = {
     'Food': 1800000,
     'Transport': 200000,
@@ -98,7 +91,7 @@ BUDGET_PLAN = {
     'Body Care': 100000,
     'Charity': 50000,
     'Savings': 700000,
-    'Receivables': 0 # Budget 0 because it's not a real expense, just temporary
+    'Receivables': 0 
 }
 
 # --- LOAD DATA ---
@@ -126,19 +119,15 @@ with st.sidebar:
     tipe = st.selectbox("Type", ["Expense", "Income", "Transfer"])
     
     kategori, sumber, tujuan = "-", "-", "-"
-    
-    # Variable to hold list of entries to save
     entries_to_save = []
     
     if tipe == "Expense":
         sumber = st.selectbox("Source Account", AKUN_LIST)
         
-        # --- SPLIT BILL LOGIC ---
         is_split = st.checkbox("Split Bill")
         
         if is_split:
             col_split1, col_split2 = st.columns(2)
-            
             with col_split1:
                 total_bill = st.number_input("Total Bill Paid", min_value=0, step=1000)
             with col_split2:
@@ -147,34 +136,26 @@ with st.sidebar:
             friends_part = total_bill - my_part
             st.caption(f"**Receivables:** Rp {friends_part:,.0f}")
             
-            # Input Category for MY portion
             kategori = st.selectbox("Category (For My Portion)", list(BUDGET_PLAN.keys()) + ["Other"])
             catatan = st.text_input("Note")
             
-            # Button Logic for Split Bill
             if st.button("Save Split Transaction ☁️"):
                 if total_bill > 0:
-                    # Entry 1: My Expense
                     entries_to_save.append({
                         'Tanggal': tgl, 'Tipe': 'Expense', 'Kategori': kategori,
                         'Sumber': sumber, 'Tujuan': '-', 'Nominal': my_part,
                         'Catatan': f"{catatan} (My Part)"
                     })
-                    
-                    # Entry 2: Receivables (Only if friend owes > 0)
                     if friends_part > 0:
                         entries_to_save.append({
                             'Tanggal': tgl, 'Tipe': 'Expense', 'Kategori': 'Receivables',
                             'Sumber': sumber, 'Tujuan': '-', 'Nominal': friends_part,
                             'Catatan': f"{catatan} (Piutang)"
                         })
-        
         else:
-            # Normal Expense
             kategori = st.selectbox("Category", list(BUDGET_PLAN.keys()) + ["Other"])
             nominal = st.number_input("Amount (IDR)", min_value=0, step=1000)
             catatan = st.text_input("Note")
-            
             if st.button("Save to Cloud ☁️"):
                 entries_to_save.append({
                     'Tanggal': tgl, 'Tipe': 'Expense', 'Kategori': kategori,
@@ -185,10 +166,9 @@ with st.sidebar:
     elif tipe == "Income":
         tujuan = st.selectbox("Destination Account", AKUN_LIST)
         
-        # Special case: Friend paying back debt
         is_debt_repayment = st.checkbox("Debt Repayment")
         if is_debt_repayment:
-            kategori = "Receivables" # Using same category to net-off expenses later if needed
+            kategori = "Receivables" 
             st.caption("This will be recorded as Income with Category 'Receivables'")
         else:
             kategori = "Income"
@@ -221,7 +201,6 @@ with st.sidebar:
                 'Catatan': catatan
             })
 
-    # --- FINAL SAVE EXECUTION ---
     if entries_to_save:
         with st.spinner("Saving to Google Sheets..."):
             save_data(entries_to_save)
@@ -229,13 +208,13 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- MAIN DATA FILTER ---
+# --- MAIN DATA FILTER (MONTHLY) ---
 if not df.empty:
     df_month = df[(df['Tanggal'].dt.month == sel_month) & (df['Tanggal'].dt.year == sel_year)]
 else:
     df_month = pd.DataFrame()
 
-# --- NET WORTH KPI ---
+# --- KPI SALDO (GLOBAL) ---
 saldo_cols = st.columns(len(AKUN_LIST))
 total_harta = 0
 
@@ -253,20 +232,18 @@ else:
 st.info(f"**Current Net Worth: Rp {total_harta:,.0f}**")
 st.divider()
 
-# --- BUDGET MONITORING ---
+# --- BUDGET MONITORING (MONTHLY) ---
 nama_bulan = datetime(sel_year, sel_month, 1).strftime('%B %Y')
 st.subheader(f"📉 Budget Monitoring ({nama_bulan})")
 
 col_kiri, col_kanan = st.columns([2, 1])
 
 with col_kiri:
-    # We exclude 'Receivables' from Total Budget Calculation because it's not real spending plan
     real_budget_plan = {k: v for k, v in BUDGET_PLAN.items() if k != 'Receivables'}
     total_budget = sum(real_budget_plan.values())
     total_spent_month = 0
     
     if not df_month.empty:
-        # Loop only through Real Budget Categories (Food, Transport, etc.)
         for kat, pagu in real_budget_plan.items():
             terpakai = df_month[((df_month['Tipe'] == 'Expense') | (df_month['Tipe'] == 'Transfer')) & (df_month['Kategori'] == kat)]['Nominal'].sum()
             persen = min(terpakai / pagu, 1.0) if pagu > 0 else 0
@@ -285,15 +262,26 @@ with col_kanan:
     st.metric("Used", f"{total_spent_month:,.0f}", delta_color="inverse")
     st.metric("Remaining", f"{sisa_total:,.0f}", delta=f"{sisa_total:,.0f}")
     
-    # Show Receivables separately
-    if not df_month.empty:
-        total_piutang = df_month[(df_month['Tipe'] == 'Expense') & (df_month['Kategori'] == 'Receivables')]['Nominal'].sum()
-        st.divider()
-        st.metric("💰 Unpaid Debt (Receivables)", f"{total_piutang:,.0f}", help="Money you paid for others this month")
+    st.divider()
+    # --- REVISI LOGIKA PIUTANG ---
+    # Menggunakan df (Global) bukan df_month, agar menghitung total utang teman sepanjang masa
+    if not df.empty:
+        # 1. Total Uang yang kamu talangi (Keluar)
+        piutang_out = df[(df['Tipe'] == 'Expense') & (df['Kategori'] == 'Receivables')]['Nominal'].sum()
+        
+        # 2. Total Uang yang teman bayar (Masuk)
+        piutang_in = df[(df['Tipe'] == 'Income') & (df['Kategori'] == 'Receivables')]['Nominal'].sum()
+        
+        # 3. Sisa Utang Teman
+        total_piutang = piutang_out - piutang_in
+        
+        st.metric("💰 Unpaid Debt (Receivables)", f"{total_piutang:,.0f}", help="Total All-Time (Money Out - Money In)")
+    else:
+        st.metric("💰 Unpaid Debt (Receivables)", "0")
 
 st.divider()
 
-# --- EXPENSE ANALYSIS ---
+# --- EXPENSE ANALYSIS (MONTHLY) ---
 st.subheader("📊 Expense Analysis")
 
 if not df_month.empty:
@@ -302,9 +290,8 @@ if not df_month.empty:
     if not df_expense.empty:
         unique_categories = df_expense['Kategori'].unique().tolist()
         
-        # Default: Select all except 'Receivables' so it doesn't skew the daily chart
         default_selection = [c for c in unique_categories if c != 'Receivables']
-        if not default_selection: default_selection = unique_categories # Fallback
+        if not default_selection: default_selection = unique_categories
 
         selected_categories = st.multiselect(
             "🎛️ Filter Categories (Select to display):",
@@ -369,4 +356,3 @@ with st.expander(f"Transaction History - {nama_bulan}"):
         st.dataframe(df_display.sort_values(by='Tanggal', ascending=False), use_container_width=True)
     else:
         st.write("No data available.")
-
